@@ -184,3 +184,40 @@
   (is (= (g/qualify candidate baseline) (g/qualify candidate baseline)))
   (is (= (g/claim (g/qualify candidate baseline) candidate baseline)
          (g/claim (g/qualify candidate baseline) candidate baseline))))
+
+;; ── power, before the experiment ─────────────────────────────────────────
+
+(deftest the-noise-floor-is-the-separation-rule-run-backwards
+  (testing "clean arms: the policy floor binds, not the noise"
+    (is (= 0.05 (g/minimum-detectable-improvement candidate baseline))))
+  (testing "noisy arms: the noise binds instead"
+    (let [b (obs :noisy-b [100 90 110 95 105])
+          c (obs :noisy-c [94 88 100 90 98])
+          floor (g/minimum-detectable-improvement c b)]
+      (is (< 0.12 floor 0.14))
+      (testing "and that is exactly the 6% result the gate refused"
+        (is (not (:qualified? (g/qualify c b))))
+        (is (< 0.06 floor))))))
+
+(deftest an-experiment-can-be-known-unrunnable-before-it-is-run
+  (let [b (obs :pilot-b [100 90 110 95 105])
+        c (obs :pilot-c [94 88 100 90 98])
+        d (g/detectable? c b 0.05)]
+    (is (not (:detectable? d)))
+    (is (pos? (:shortfall d)))
+    (is (re-find #"cannot pass anything under" (:remedy d))))
+  (testing "a large enough effect clears the same noise"
+    (let [b (obs :pilot-b [100 90 110 95 105])
+          c (obs :pilot-c [94 88 100 90 98])]
+      (is (:detectable? (g/detectable? c b 0.5)))
+      (is (nil? (:shortfall (g/detectable? c b 0.5)))))))
+
+(deftest samples-needed-scales-with-the-square-of-the-shortfall
+  (let [b (obs :pilot-b [100 90 110 95 105])
+        c (obs :pilot-c [94 88 100 90 98])
+        s (g/samples-needed c b 0.05)]
+    (is (> (:needed s) 5))
+    (testing "and it says out loud when more sampling is the wrong answer"
+      (is (re-find #"migrating threads" (:note s)))))
+  (testing "an already-detectable effect needs no more"
+    (is (= 5 (:needed (g/samples-needed candidate baseline 0.2))))))

@@ -286,3 +286,67 @@
         (mapv (fn [r] (str "  - " (name (:reason r))
                            (when (:note r) (str ": " (:note r)))))
               (:reasons verdict))))
+
+;; ── before the experiment ────────────────────────────────────────────────
+;;
+;; Everything above judges a result after it exists. That is one turn too
+;; late for a common and expensive mistake: running an experiment whose
+;; effect is smaller than its own noise, then reading the sign off the means
+;; anyway. Three consecutive runs of one such experiment produced +3%, +31%
+;; and -22% before the gate was consulted at all.
+;;
+;; The arithmetic is the same in both directions. `qualify` requires the gap
+;; to exceed the summed standard deviations; run that backwards and it gives
+;; the smallest improvement this gate could ever pass.
+
+(defn minimum-detectable-improvement
+  "The smallest improvement these two arms' noise would let `qualify` pass.
+
+  Derived from the separation rule rather than added on top of it: qualifying
+  needs `mean_b - mean_c > sd_b + sd_c`, so the improvement must exceed
+  `(sd_b + sd_c) / mean_b` — and never less than the policy's floor."
+  ([baseline candidate] (minimum-detectable-improvement baseline candidate default-policy))
+  ([baseline candidate policy]
+   (let [policy (merge default-policy policy)
+         bs (:observation/summary baseline)
+         cs (:observation/summary candidate)
+         noise-floor (if (pos? (:mean bs))
+                       (/ (+ (:stdev bs) (:stdev cs)) (:mean bs))
+                       ##Inf)]
+     (max (:policy/min-improvement policy) noise-floor))))
+
+(defn detectable?
+  "Could an improvement of `expected` survive this gate, given this noise?
+
+  Call it with pilot samples before committing to a long run. An experiment
+  that answers `false` here cannot produce a qualifying result no matter how
+  many times it is run — running it anyway produces a number with a sign, and
+  the sign is the noise's."
+  ([baseline candidate expected] (detectable? baseline candidate expected default-policy))
+  ([baseline candidate expected policy]
+   (let [floor (minimum-detectable-improvement baseline candidate policy)]
+     {:expected-improvement expected
+      :minimum-detectable floor
+      :detectable? (> expected floor)
+      :shortfall (when (<= expected floor) (- floor expected))
+      :remedy (when (<= expected floor)
+                (str "reduce noise or raise the effect: at this spread the gate cannot "
+                     "pass anything under " (Math/round (* 100.0 floor)) "%"))})))
+
+(defn samples-needed
+  "Roughly how many samples would bring the noise floor under `expected`.
+
+  Standard error shrinks with the square root of the count, so the sample
+  count scales with the square of how far short you are. Rough on purpose —
+  it assumes the spread itself does not change with more sampling, which is
+  false whenever the noise is a scheduler moving threads between core types
+  rather than ordinary jitter. Use it to decide between 'take more samples'
+  and 'this harness cannot answer the question'."
+  ([baseline candidate expected] (samples-needed baseline candidate expected default-policy))
+  ([baseline candidate expected policy]
+   (let [floor (minimum-detectable-improvement baseline candidate policy)
+         n (:n (:observation/summary candidate))]
+     (if (> expected floor)
+       {:needed n :note "already detectable at the current sample count"}
+       {:needed (long (Math/ceil (* n (Math/pow (/ floor (max expected 1e-9)) 2))))
+        :note "assumes the spread is sampling jitter; it is not, if the machine is migrating threads"}))))

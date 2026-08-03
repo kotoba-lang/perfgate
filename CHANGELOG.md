@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.2.0 — 2026-08-03
+
+Power analysis: `minimum-detectable-improvement`, `detectable?`,
+`samples-needed`.
+
+Everything in 0.1.0 judges a result after it exists, which is one turn too
+late for a common and expensive mistake — running an experiment whose effect
+is smaller than its own noise, then reading the sign off the means anyway.
+Two real cases in one afternoon: a thread-scaling sweep whose three
+consecutive runs gave +3%, +31% and -22%, and a matmul tiling sweep whose best
+blocking bought 5% against a noise floor above it.
+
+The arithmetic is the separation rule run backwards. Qualifying needs
+`mean_b - mean_c > sd_b + sd_c`, so the smallest improvement the gate could
+ever pass is `(sd_b + sd_c) / mean_b`. Run a pilot, call `detectable?`, and
+learn before committing to the long run.
+
+`samples-needed` says out loud that more sampling is the wrong answer when the
+spread comes from a scheduler migrating threads between core types rather than
+from ordinary jitter.
+
+21 tests, 66 assertions.
+
+
 ## 0.1.0 — 2026-08-03
 
 Initial implementation.
