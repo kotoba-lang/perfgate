@@ -99,7 +99,7 @@ the claim as `:claim/policy-id`.
 ## Test
 
 ```sh
-clojure -M:test
+kbb -M:test
 ```
 
 Pure `.cljc`. Depends only on
